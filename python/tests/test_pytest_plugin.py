@@ -211,3 +211,49 @@ class TestPytestPluginDurations:
         result2.assert_outcomes(passed=0)
         # Should show estimated duration (format: ~X.Xs saved)
         result2.stdout.fnmatch_lines(["*~*s saved*"])
+
+
+def test_collect_file_does_not_reread_affected_modules(tmp_path):
+    """Membership checks use a cached set, not the handler property.
+
+    The handler property builds a new set on every read, so reading it per
+    collected file makes collection cost files x changed paths.
+    """
+    from types import SimpleNamespace
+
+    from tach.pytest_plugin import (
+        TachPluginState,
+        pytest_collect_file,
+        tach_state_key,
+    )
+
+    reads = 0
+
+    class Handler:
+        @property
+        def all_affected_modules(self):
+            nonlocal reads
+            reads += 1
+            return {tmp_path / "a.py"}
+
+        def should_remove_items(self, file_path):
+            return False
+
+    stash = {
+        tach_state_key: TachPluginState(
+            handler=Handler(),  # type: ignore[arg-type]
+            skip_enabled=False,
+            verbose=False,
+            base="main",
+            head=None,
+            would_skip_paths=set(),
+            affected_paths=frozenset({str(tmp_path / "a.py")}),
+        )
+    }
+    parent = SimpleNamespace(config=SimpleNamespace(stash=stash))
+    for _ in range(50):
+        gen = pytest_collect_file(tmp_path / "a.py", parent)  # type: ignore[arg-type]
+        next(gen)
+        with pytest.raises(StopIteration):
+            gen.send(["collector"])
+    assert reads == 0

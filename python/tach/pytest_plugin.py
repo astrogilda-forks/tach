@@ -113,6 +113,12 @@ class TachPluginState:
     base: str
     head: str | None
     would_skip_paths: set[Path]
+    affected_paths: frozenset[str] = frozenset()
+    """Changed file paths as strings, built once per session.
+
+    handler.all_affected_modules rebuilds a new set on every read, so
+    membership checks in pytest_collect_file must not go through it.
+    """
 
 
 tach_state_key: StashKey[TachPluginState] = StashKey()
@@ -270,6 +276,7 @@ def pytest_configure(config: Config):
         base=base,
         head=head,
         would_skip_paths=set(),
+        affected_paths=frozenset(str(p) for p in handler.all_affected_modules),
     )
 
 
@@ -306,7 +313,7 @@ def pytest_collect_file(
     resolved_path = file_path.resolve()
 
     # If this test file was changed, keep it
-    if str(resolved_path) in handler.all_affected_modules:
+    if str(resolved_path) in state.affected_paths:
         return result
 
     # Check if file should be removed based on its imports
